@@ -1,0 +1,13 @@
+{
+  "name": "villa-ledger-android",
+  "private": true,
+  "description": "Android wrapper for the Villa Expense Ledger web app (built in CI).",
+  "scripts": {
+    "prepare-web": "rm -rf www && cp -r ../web www"
+  },
+  "dependencies": {
+    "@capacitor/android": "7.6.9",
+    "@capacitor/cli": "7.6.9",
+    "@capacitor/core": "7.6.9"
+  }
+}
