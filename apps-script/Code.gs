@@ -5,7 +5,10 @@
  * (Extensions → Apps Script), set the two PINs below, then
  * Deploy → New deployment → Web app (Execute as: Me, Who has access: Anyone).
  * The app talks to the resulting ".../exec" link. Every entry is a row
- * in the "Entries" tab, so the sheet itself is also a readable record.
+ * in the "Entries" tab. After each change the script also rebuilds that
+ * month's tab ("Nov 2026": day-wise, with totals and a filter) and the
+ * "Summary" tab. Run rebuildAllMonths() once from the editor to rebuild
+ * every month tab from "Entries".
  */
 
 // PIN for adding, editing and deleting entries. Change it before deploying.
@@ -34,8 +37,16 @@ function doPost(e) {
     const lock = LockService.getScriptLock();
     lock.waitLock(15000);
     try {
-      if (req.action === 'save') return json_({ ok: true, entry: save_(req.entry || {}) });
-      if (req.action === 'delete') { delete_(String(req.id || '')); return json_({ ok: true }); }
+      if (req.action === 'save') {
+        const saved = save_(req.entry || {});
+        refreshMonths_([saved.date, saved.previousDate]);
+        delete saved.previousDate;
+        return json_({ ok: true, entry: saved });
+      }
+      if (req.action === 'delete') {
+        refreshMonths_([delete_(String(req.id || ''))]);
+        return json_({ ok: true });
+      }
     } finally {
       lock.releaseLock();
     }
@@ -102,19 +113,28 @@ function save_(e) {
   const id = e.id ? String(e.id) : Utilities.getUuid();
   const row = findRow_(sh, id);
   const created = row ? sh.getRange(row, 10).getValue() : now;
+  const previousDate = row ? dateText_(sh.getRange(row, 2).getValue()) : '';
   const values = [[id, date, type === 'credit' ? 'Credit' : 'Debit', CATEGORIES[category], description,
     String(e.person || '').trim().slice(0, 80), method, amount, String(e.note || '').trim().slice(0, 400), created, now]];
   if (row) sh.getRange(row, 1, 1, HEADERS.length).setValues(values);
   else sh.getRange(sh.getLastRow() + 1, 1, 1, HEADERS.length).setValues(values);
   return { id: id, date: date, type: type, category: category, description: values[0][4], person: values[0][5],
-    method: method, amount: amount, note: values[0][8], createdAt: (created instanceof Date ? created : now).getTime() };
+    method: method, amount: amount, note: values[0][8], createdAt: (created instanceof Date ? created : now).getTime(),
+    previousDate: previousDate };
 }
 
 function delete_(id) {
   if (!id) throw new Error('Missing entry id.');
   const sh = sheet_();
   const row = findRow_(sh, id);
-  if (row) sh.deleteRow(row);
+  if (!row) return '';
+  const date = dateText_(sh.getRange(row, 2).getValue());
+  sh.deleteRow(row);
+  return date;
+}
+
+function dateText_(v) {
+  return v instanceof Date ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(v || '');
 }
 
 function findRow_(sh, id) {
@@ -123,6 +143,106 @@ function findRow_(sh, id) {
   const ids = sh.getRange(2, 1, n, 1).getValues();
   for (let i = 0; i < ids.length; i++) if (String(ids[i][0]) === id) return i + 2;
   return 0;
+}
+
+/* ---------- Month tabs and Summary ---------- */
+
+const MONTH_CATS = ['Utilities', 'Visa', 'Tickets', 'Villa cash'];
+const HEAD_FILL = '#e0f0f2';
+
+// Rebuild every month tab and the Summary from "Entries". Run it from the editor.
+function rebuildAllMonths() {
+  const months = {};
+  list_().forEach(function (e) { months[e.date.slice(0, 7)] = true; });
+  refreshMonths_(Object.keys(months).map(function (m) { return m + '-01'; }));
+}
+
+function refreshMonths_(dates) {
+  const all = list_();
+  const done = {};
+  dates.forEach(function (d) {
+    const ym = String(d || '').slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(ym) || done[ym]) return;
+    done[ym] = true;
+    writeMonth_(ym, all.filter(function (e) { return e.date.indexOf(ym) === 0; }));
+  });
+  writeSummary_(all);
+}
+
+function monthTitle_(ym) {
+  const p = ym.split('-');
+  return Utilities.formatDate(new Date(Number(p[0]), Number(p[1]) - 1, 1, 12), Session.getScriptTimeZone(), 'MMM yyyy');
+}
+
+function tab_(title, index) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(title);
+  if (!sh) sh = ss.insertSheet(title, Math.min(index, ss.getNumSheets()));
+  const filter = sh.getFilter();
+  if (filter) filter.remove();
+  sh.clear();
+  return sh;
+}
+
+// Text that starts like a formula is kept as plain text.
+function text_(v) {
+  const t = String(v == null ? '' : v);
+  return /^[=+\-@]/.test(t) ? "'" + t : t;
+}
+
+function writeMonth_(ym, entries) {
+  entries.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt || 0) - (b.createdAt || 0); });
+  const sh = tab_(monthTitle_(ym), 1);
+  // Totals sit above the header so the filter never hides them.
+  const top = [
+    ['Credit', '=SUM(H5:H)', 'Debit', '=SUM(I5:I)', 'Balance', '=B1-D1', 'Shown by filter:', 'Credit', '=SUBTOTAL(109,H5:H)', 'Debit', '=SUBTOTAL(109,I5:I)'],
+    [].concat.apply([], MONTH_CATS.map(function (c) { return [c, '=SUMIFS(I5:I,D5:D,"' + c + '")']; })).concat(['', '', '']),
+    ['', '', '', '', '', '', '', '', '', '', ''],
+  ];
+  sh.getRange(1, 1, top.length, 11).setValues(top);
+  sh.getRange(1, 1, 2, 11).setFontWeight('bold').setNumberFormat('#,##0.00');
+
+  const header = ['Date', 'Day', 'Type', 'Category', 'Description', 'Person', 'Paid by', 'Credit (AED)', 'Debit (AED)', 'Note'];
+  const rows = entries.map(function (e) {
+    const p = e.date.split('-').map(Number);
+    const day = new Date(p[0], p[1] - 1, p[2], 12);
+    const credit = e.type === 'credit';
+    return [day, Utilities.formatDate(day, Session.getScriptTimeZone(), 'EEEE'), credit ? 'Credit' : 'Debit',
+      CATEGORIES[e.category] || e.category, text_(e.description), text_(e.person), text_(e.method),
+      credit ? e.amount : '', credit ? '' : e.amount, text_(e.note)];
+  });
+  const table = sh.getRange(4, 1, rows.length + 1, header.length);
+  table.setValues([header].concat(rows));
+  sh.getRange(4, 1, 1, header.length).setFontWeight('bold').setBackground(HEAD_FILL);
+  if (rows.length) {
+    sh.getRange(5, 1, rows.length, 1).setNumberFormat('dd-mmm-yyyy');
+    sh.getRange(5, 8, rows.length, 2).setNumberFormat('#,##0.00');
+  }
+  table.createFilter();
+  sh.setFrozenRows(4);
+  sh.autoResizeColumns(1, 11);
+}
+
+function writeSummary_(entries) {
+  const sh = tab_('Summary', 0);
+  const byMonth = {};
+  entries.forEach(function (e) {
+    const ym = e.date.slice(0, 7);
+    const m = byMonth[ym] || (byMonth[ym] = { credit: 0, debit: 0, cats: {} });
+    if (e.type === 'credit') m.credit += e.amount;
+    else { m.debit += e.amount; m.cats[e.category] = (m.cats[e.category] || 0) + e.amount; }
+  });
+  const keys = ['utilities', 'visa', 'tickets', 'villa'];
+  const rows = Object.keys(byMonth).sort().reverse().map(function (ym) {
+    const m = byMonth[ym];
+    return [monthTitle_(ym), m.credit, m.debit, m.credit - m.debit].concat(keys.map(function (k) { return m.cats[k] || 0; }));
+  });
+  const header = ['Month', 'Credit', 'Debit', 'Balance'].concat(MONTH_CATS);
+  sh.getRange(1, 1, rows.length + 1, header.length).setValues([header].concat(rows));
+  sh.getRange(1, 1, 1, header.length).setFontWeight('bold').setBackground(HEAD_FILL);
+  if (rows.length) sh.getRange(2, 2, rows.length, header.length - 1).setNumberFormat('#,##0.00');
+  sh.setFrozenRows(1);
+  sh.autoResizeColumns(1, header.length);
 }
 
 function json_(obj) {

@@ -4,6 +4,18 @@ A cash book for **Utilities, Visa, Tickets and Villa cash**, with Credit (money 
 Debit (money out) and Balance in AED. One app runs on iPhone, Android and Mac. Every
 entry is saved as a row in a Google Sheet you own, so the sheet is also a readable record.
 
+The sheet has three kinds of tab:
+
+| Tab | What it holds |
+|---|---|
+| `Entries` | Every entry, one row each. The app reads and writes only this tab |
+| `Nov 2026`, `Dec 2026`, … | One tab per month, day by day, with Credit/Debit/Balance and category totals above a filtered table. Rebuilt by the script after every change |
+| `Summary` | One row per month: Credit, Debit, Balance and each category |
+
+Edit entries in the app, not in the month tabs: a month tab is rebuilt from `Entries`
+each time something in that month changes. To rebuild every month tab at once, open the
+Apps Script editor, choose `rebuildAllMonths` in the function list and press **Run**.
+
 ```
  iPhone / Mac (installed web app)  ─┐
  Android (APK)                      ─┼──►  Apps Script link (/exec)  ──►  Google Sheet "Entries" tab
@@ -33,7 +45,7 @@ entry is saved as a row in a Google Sheet you own, so the sheet is also a readab
 "Anyone" means the link answers requests from the app without a Google sign-in. Nothing
 can be read or changed without a correct PIN. Keep the link and PINs private.
 
-If you change `Code.gs` later, use **Deploy → Manage deployments → Edit → New version**,
+If you change `Code.gs` later, use **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**,
 so the same link keeps working.
 
 ## 2. Install the app
