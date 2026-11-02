@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Villa Ledger</title>
+<meta name="description" content="Cash book for utilities, visa, tickets and villa cash.">
+<meta name="theme-color" content="#0f6b74">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Villa Ledger">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/favicon.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: credit / debit / balance strip, four category tiles, then entry form beside a month-filtered cash book; stacks on phones. */
+:root {
+  --bg: #f3f5f6; --surface: #ffffff; --ink: #172026; --muted: #5d6b74; --line: #dbe1e5;
+  --accent: #0f6b74; --accent-ink: #ffffff; --danger: #b3261e; --pos: #1d7a45; --neg: #b3261e;
+  --c-util: #2463b5; --c-visa: #7446b8; --c-tick: #b86e0a; --c-villa: #237a4b;
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-body: "Figtree", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #0f1518; --surface: #172025; --ink: #e5ecef; --muted: #93a3ac; --line: #2a363d;
+  --accent: #4fb6bf; --accent-ink: #062226; --danger: #f08b84; --pos: #62c98f; --neg: #f08b84;
+  --c-util: #6fa2ea; --c-visa: #ad8ae6; --c-tick: #e3a44a; --c-villa: #5cc28b; color-scheme: dark } }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.wrap { max-width: 1140px; margin: 0 auto; padding-block: 20px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 20px; }
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 1.1rem; font-weight: 700; }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+.sr { position: absolute; left: -9999px; }
+
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 24px; }
+header p { margin: 2px 0 0; color: var(--muted); }
+.controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.controls label { display: grid; gap: 4px; }
+
+input, select, textarea, button { font: inherit; color: inherit; }
+input, select, textarea { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; min-width: 0; width: 100%; font-size: 16px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button { cursor: pointer; border-radius: 6px; padding: 8px 14px; border: 1px solid var(--line); background: var(--surface); font-weight: 600; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.link { border: 0; background: none; padding: 4px 6px; color: var(--accent); font-weight: 500; }
+button.link.danger { color: var(--danger); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 0.85rem; color: var(--muted); }
+.status .dotx { width: 8px; height: 8px; border-radius: 50%; background: var(--pos); }
+.status.off .dotx { background: var(--danger); }
+.status.busy .dotx { background: var(--c-tick); }
+
+.totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; display: grid; gap: 6px; border-top: 3px solid var(--cat, var(--accent)); text-align: left; font-weight: 400; }
+button.tile[aria-pressed="true"] { box-shadow: inset 0 0 0 1px var(--cat); }
+.tile .amt { font-size: 1.25rem; font-weight: 500; overflow-wrap: anywhere; }
+.totals .amt { font-size: 1.45rem; }
+.tile .sub { font-size: 0.8rem; color: var(--muted); }
+.amt.pos { color: var(--pos); } .amt.neg { color: var(--neg); }
+.bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.bar span { display: block; height: 100%; background: var(--cat); }
+
+.main { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 24px; align-items: start; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 18px; display: grid; gap: 12px; }
+.card label { display: grid; gap: 4px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; width: auto; }
+.seg label { display: block !important; text-align: center; padding: 8px; cursor: pointer; font-weight: 600; font-size: 0.92rem; }
+.seg label:has(input:checked) { background: var(--ink); color: var(--bg); }
+.cats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.cats input { position: absolute; opacity: 0; pointer-events: none; width: auto; }
+.cats label { display: flex !important; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; cursor: pointer; font-weight: 500; }
+.cats label:has(input:checked) { border-color: var(--cat); box-shadow: inset 0 0 0 1px var(--cat); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--cat); flex: none; }
+.form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.msg { font-size: 0.85rem; color: var(--muted); min-height: 1.3em; margin: 0; }
+.msg.err { color: var(--danger); }
+
+.ledger { min-width: 0; display: grid; gap: 12px; }
+.ledger-head { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; }
+.ledger-head select { width: auto; padding: 6px 10px; }
+.table-box { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; -webkit-overflow-scrolling: touch; }
+table { width: 100%; border-collapse: collapse; min-width: 640px; }
+th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+td.r, th.r { text-align: right; }
+td.cr { color: var(--pos); }
+tbody tr:last-child td { border-bottom: 0; }
+tfoot td { border-top: 2px solid var(--line); border-bottom: 0; font-weight: 600; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 600; color: var(--cat); white-space: nowrap; }
+.desc small { display: block; color: var(--muted); }
+.empty { padding: 36px 20px; text-align: center; color: var(--muted); }
+.empty strong { display: block; color: var(--ink); font-family: var(--font-display); font-size: 1.05rem; margin-bottom: 4px; }
+
+.setup { max-width: 520px; margin: 0 auto; }
+.setup ol { margin: 0; padding-left: 1.2em; color: var(--muted); display: grid; gap: 4px; }
+.setup code { font-family: var(--font-num); font-size: 0.85em; overflow-wrap: anywhere; }
+
+[data-cat="utilities"] { --cat: var(--c-util); }
+[data-cat="visa"] { --cat: var(--c-visa); }
+[data-cat="tickets"] { --cat: var(--c-tick); }
+[data-cat="villa"] { --cat: var(--c-villa); }
+[data-cat="received"] { --cat: var(--pos); }
+
+@media (max-width: 900px) { .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .main { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .totals { grid-template-columns: 1fr; } h1 { font-size: 1.5rem; }
+  .summary .amt { font-size: 1.02rem; } .summary .tile { padding: 12px; }
+  /* Cash book rows become stacked cards on phones */
+  table { min-width: 0; } thead { display: none; }
+  tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "date amt" "desc desc" "cat act"; gap: 2px 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  tbody tr:last-child { border-bottom: 0; }
+  tbody td { border: 0; padding: 0; } tbody td:empty { display: none; }
+  td.c-date { grid-area: date; color: var(--muted); font-size: 0.85rem; }
+  td.c-cr, td.c-dr { grid-area: amt; font-weight: 500; }
+  td.c-desc { grid-area: desc; }
+  td.c-cat { grid-area: cat; align-self: center; }
+  td.c-method { display: none; }
+  td.c-act { grid-area: act; }
+  tfoot tr { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; padding: 10px 12px; border-top: 2px solid var(--line); }
+  tfoot td { border: 0; padding: 0; } tfoot td:empty { display: none; }
+}
+@media (prefers-reduced-motion: no-preference) { .bar span { transition: width .3s ease; } }
+</style>
+</head>
+<body>
+
+<!-- First-run screen: connect the app to the Google Sheet backend -->
+<div class="wrap" id="setupView" hidden>
+  <form class="card setup" id="setupForm" novalidate>
+    <h1>Villa Ledger</h1>
+    <p style="margin:0;color:var(--muted)">Connect this device to your expense sheet. You only do this once per device.</p>
+    <label for="s-url"><span class="label">Connection link</span>
+      <input type="url" id="s-url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" required></label>
+    <label for="s-pin"><span class="label">PIN</span>
+      <input type="password" id="s-pin" autocomplete="current-password" required></label>
+    <div class="form-actions"><button type="submit" class="primary" id="s-btn">Connect</button></div>
+    <p class="msg" id="s-msg" role="status"></p>
+    <ol>
+      <li>The connection link comes from the Google Sheet: <code>Extensions → Apps Script → Deploy</code>.</li>
+      <li>Use the edit PIN to add entries, or the view PIN to only look.</li>
+    </ol>
+  </form>
+</div>
+
+<div class="wrap" id="appView" hidden>
+  <header>
+    <div>
+      <h1>Villa Expense Ledger</h1>
+      <p>Money received, and money spent on utilities, visa, tickets and villa cash.</p>
+    </div>
+    <div class="controls">
+      <label for="month"><span class="label">Period</span>
+        <select id="month" style="width:auto"></select></label>
+      <label for="currency"><span class="label">Currency</span>
+        <select id="currency" style="width:auto">
+          <option value="AED" selected>AED</option><option value="INR">₹ INR</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option>
+        </select></label>
+      <button type="button" id="refreshBtn">Refresh</button>
+      <button type="button" id="settingsBtn">Settings</button>
+    </div>
+  </header>
+
+  <div class="status" id="status" role="status"><span class="dotx"></span><span id="statusText">Connecting…</span></div>
+
+  <section class="card" id="settingsPanel" hidden aria-labelledby="setTitle">
+    <h2 id="setTitle">Settings</h2>
+    <p style="margin:0;color:var(--muted)" id="setInfo"></p>
+    <div class="form-actions">
+      <button type="button" id="disconnectBtn">Disconnect this device</button>
+      <button type="button" id="closeSettingsBtn">Close</button>
+    </div>
+  </section>
+
+  <section class="totals" id="totals" aria-label="Credit, debit and balance"></section>
+  <section class="summary" id="summary" aria-label="Debits by category"></section>
+
+  <div class="main">
+    <form class="card" id="form" novalidate>
+      <h2 id="formTitle">Add an entry</h2>
+      <div class="seg" role="radiogroup" aria-label="Entry type">
+        <label for="t-debit"><input type="radio" name="type" id="t-debit" value="debit" checked>Debit (money out)</label>
+        <label for="t-credit"><input type="radio" name="type" id="t-credit" value="credit">Credit (money in)</label>
+      </div>
+      <fieldset id="catSet" style="border:0;padding:0;margin:0;display:grid;gap:4px">
+        <legend class="label" style="padding:0;margin-bottom:4px">Category</legend>
+        <div class="cats" id="catPick"></div>
+      </fieldset>
+      <div class="row2">
+        <label for="f-date"><span class="label">Date</span><input type="date" id="f-date" required></label>
+        <label for="f-amount"><span class="label">Amount</span><input type="number" id="f-amount" class="num" min="0" step="0.01" inputmode="decimal" placeholder="0.00" required></label>
+      </div>
+      <label for="f-desc"><span class="label">Description</span><input type="text" id="f-desc" maxlength="140" placeholder="e.g. Dewa bill villa" required></label>
+      <div class="row2">
+        <label for="f-person"><span class="label">Person</span><input type="text" id="f-person" maxlength="80" placeholder="Optional"></label>
+        <label for="f-method"><span class="label">Paid by</span>
+          <select id="f-method"><option>Cash</option><option>Bank transfer</option><option>Card</option><option>Other</option></select></label>
+      </div>
+      <label for="f-note"><span class="label">Note / reference</span><textarea id="f-note" rows="2" maxlength="400" placeholder="Bill no., passport name, PNR…"></textarea></label>
+      <div class="form-actions">
+        <button type="submit" class="primary" id="saveBtn">Save entry</button>
+        <button type="button" id="cancelBtn" hidden>Cancel edit</button>
+      </div>
+      <p class="msg" id="msg" role="status"></p>
+    </form>
+
+    <section class="ledger" aria-labelledby="ledgerTitle">
+      <div class="ledger-head">
+        <h2 id="ledgerTitle">Cash book</h2>
+        <label for="filter"><span class="sr">Show</span><select id="filter"></select></label>
+      </div>
+      <div class="table-box">
+        <table>
+          <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Paid by</th><th class="r">Credit</th><th class="r">Debit</th><th class="r"><span class="sr">Actions</span></th></tr></thead>
+          <tbody id="rows"></tbody>
+          <tfoot id="foot"></tfoot>
+        </table>
+        <div class="empty" id="empty"><strong>Loading…</strong>Your entries will appear here.</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+"use strict";
+const CATS = [
+  { id: "utilities", name: "Utilities", hint: "Dewa, wifi, subscriptions" },
+  { id: "visa", name: "Visa", hint: "Visa fees, renewals, A2A, re-entry" },
+  { id: "tickets", name: "Tickets", hint: "Flights and travel" },
+  { id: "villa", name: "Villa cash", hint: "Kitchen, groceries, furniture, repairs" },
+];
+const RECEIVED = { id: "received", name: "Received" };
+const catById = Object.fromEntries([...CATS, RECEIVED].map(c => [c.id, c]));
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("vl." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("vl." + k, JSON.stringify(v)); } catch {} },
+  del(k) { try { localStorage.removeItem("vl." + k); } catch {} },
+};
+
+let cfg = store.get("cfg", null);          // { url, pin }
+let role = store.get("role", "edit");      // "edit" | "view"
+let entries = store.get("cache", { entries: [] }).entries || [];
+let currency = store.get("currency", "AED");
+let filter = "all", editingId = null, armedDelete = null, busy = false;
+let month = new Date().toISOString().slice(0, 7);
+const canWrite = () => role === "edit";
+
+/* ---------- backend ---------- */
+const ERRORS = {
+  wrong_pin: "That PIN is not correct.",
+  read_only: "This device uses the view-only PIN, so it can't change entries.",
+  bad_request: "The app sent something the sheet didn't understand. Refresh and try again.",
+};
+async function api(action, extra = {}, conf = cfg) {
+  let res;
+  try {
+    // text/plain keeps this a "simple" request, which Apps Script accepts from any origin.
+    res = await fetch(conf.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action, pin: conf.pin, ...extra }), redirect: "follow" });
+  } catch { throw Object.assign(new Error("No internet connection, or the sheet can't be reached."), { code: "offline" }); }
+  let j;
+  try { j = await res.json(); } catch { throw Object.assign(new Error("The connection link didn't answer like the expense sheet. Check that it ends in /exec and the deployment allows Anyone."), { code: "bad_link" }); }
+  if (!j.ok) throw Object.assign(new Error(ERRORS[j.error] || j.message || "Something went wrong."), { code: j.error });
+  return j;
+}
+
+/* ---------- formatting ---------- */
+function fmt(n) {
+  try { return new Intl.NumberFormat(currency === "INR" ? "en-IN" : "en-US", { style: "currency", currency, minimumFractionDigits: 2 }).format(n); }
+  catch { return n.toFixed(2); }
+}
+function fmtDate(d) {
+  const [y, m, day] = d.split("-").map(Number);
+  return new Date(y, m - 1, day).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
+function setMsg(text, err) { $("msg").textContent = text; $("msg").className = "msg" + (err ? " err" : ""); }
+function setStatus(text, kind) { $("statusText").textContent = text; $("status").className = "status" + (kind ? " " + kind : ""); }
+const sum = list => list.reduce((s, e) => s + e.amount, 0);
+const isCredit = e => e.type === "credit";
+const localToday = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+
+/* ---------- views ---------- */
+function showSetup() {
+  $("appView").hidden = true; $("setupView").hidden = false;
+  const qs = new URLSearchParams(location.search).get("link");
+  $("s-url").value = cfg?.url || qs || "";
+  $("s-pin").value = "";
+}
+function showApp() { $("setupView").hidden = true; $("appView").hidden = false; render(); refresh(); }
+
+$("setupForm").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const url = $("s-url").value.trim(), pin = $("s-pin").value.trim();
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)) { $("s-msg").textContent = "Paste the full web app link. It starts with https://script.google.com/macros/s/ and ends with /exec."; $("s-msg").className = "msg err"; return; }
+  if (!pin) { $("s-msg").textContent = "Enter the PIN."; $("s-msg").className = "msg err"; return; }
+  $("s-btn").disabled = true; $("s-msg").className = "msg"; $("s-msg").textContent = "Checking…";
+  try {
+    const j = await api("list", {}, { url, pin });
+    cfg = { url, pin }; role = j.role; entries = j.entries;
+    store.set("cfg", cfg); store.set("role", role); store.set("cache", { entries, at: Date.now() });
+    showApp();
+  } catch (err) { $("s-msg").textContent = err.message; $("s-msg").className = "msg err"; }
+  finally { $("s-btn").disabled = false; }
+});
+
+/* ---------- data ---------- */
+async function refresh() {
+  if (!cfg || busy) return;
+  busy = true; setStatus("Updating…", "busy");
+  try {
+    const j = await api("list");
+    entries = j.entries; role = j.role;
+    store.set("cache", { entries, at: Date.now() }); store.set("role", role);
+    setStatus(`Up to date · ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${canWrite() ? "" : " · view only"}`);
+  } catch (err) {
+    if (err.code === "wrong_pin") { store.del("cfg"); cfg = null; showSetup(); $("s-msg").textContent = "The PIN was changed. Enter the new PIN."; $("s-msg").className = "msg err"; }
+    else {
+      const at = store.get("cache", {}).at;
+      setStatus(`${err.message}${at ? " Showing the copy saved " + new Date(at).toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) + "." : ""}`, "off");
+    }
+  } finally { busy = false; render(); }
+}
+$("refreshBtn").addEventListener("click", refresh);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refresh(); });
+window.addEventListener("online", refresh);
+
+/* ---------- rendering ---------- */
+$("catPick").innerHTML = CATS.map((c, i) => `
+  <label data-cat="${c.id}" title="${esc(c.hint)}"><input type="radio" name="cat" id="cat-${c.id}" value="${c.id}" ${i === 0 ? "checked" : ""}><span class="dot"></span>${c.name}</label>`).join("");
+function syncType() { $("catSet").hidden = $("t-credit").checked; }
+document.querySelectorAll('input[name="type"]').forEach(r => r.addEventListener("change", syncType));
+
+function renderFilter() {
+  $("filter").innerHTML = `<option value="all">All entries</option><option value="credit">Credit (money in)</option><option value="debit">Debit (money out)</option>` +
+    CATS.map(c => `<option value="${c.id}">${c.name}</option>`).join("");
+  $("filter").value = filter;
+}
+$("filter").addEventListener("change", e => { filter = e.target.value; render(); });
+
+function renderMonths() {
+  const set = new Set(entries.map(e => e.date.slice(0, 7)));
+  set.add(new Date().toISOString().slice(0, 7));
+  if (month !== "all") set.add(month);
+  const list = [...set].sort().reverse();
+  $("month").innerHTML = `<option value="all">All time</option>` + list.map(m => {
+    const [y, mm] = m.split("-").map(Number);
+    return `<option value="${m}">${new Date(y, mm - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}</option>`;
+  }).join("");
+  $("month").value = month;
+}
+$("month").addEventListener("change", e => { month = e.target.value; render(); });
+
+const inPeriod = e => month === "all" || e.date.startsWith(month);
+const matches = e => filter === "all" || (filter === "credit" ? isCredit(e) : filter === "debit" ? !isCredit(e) : !isCredit(e) && e.category === filter);
+
+function render() {
+  renderMonths(); renderFilter();
+  const period = entries.filter(inPeriod);
+  const credits = period.filter(isCredit), debits = period.filter(e => !isCredit(e));
+  const inn = sum(credits), out = sum(debits), bal = inn - out;
+  const periodName = month === "all" ? "all time" : $("month").selectedOptions[0]?.textContent;
+
+  $("totals").innerHTML = `
+    <div class="tile"><span class="label">Credit · ${esc(periodName)}</span><span class="amt num pos">${fmt(inn)}</span><span class="sub">${credits.length} money in</span></div>
+    <div class="tile"><span class="label">Debit · ${esc(periodName)}</span><span class="amt num">${fmt(out)}</span><span class="sub">${debits.length} ${debits.length === 1 ? "expense" : "expenses"}</span></div>
+    <div class="tile"><span class="label">Balance</span><span class="amt num ${bal < 0 ? "neg" : "pos"}">${bal < 0 ? "−" : ""}${fmt(Math.abs(bal))}</span><span class="sub">${bal < 0 ? "Spent more than received" : "Credit minus debit"}</span></div>`;
+
+  $("summary").innerHTML = CATS.map(c => {
+    const list = debits.filter(e => e.category === c.id), s = sum(list);
+    const pct = out ? Math.round(s / out * 100) : 0;
+    return `<button type="button" class="tile" data-cat="${c.id}" data-f="${c.id}" aria-pressed="${filter === c.id}" title="Show only ${esc(c.name)}">
+      <span class="label">${c.name}</span><span class="amt num">${fmt(s)}</span>
+      <span class="bar" aria-hidden="true"><span style="width:${pct}%"></span></span>
+      <span class="sub">${pct}% · ${list.length} ${list.length === 1 ? "expense" : "expenses"}</span></button>`;
+  }).join("");
+
+  const shown = period.filter(matches).sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || 0) - (b.createdAt || 0));
+  $("rows").innerHTML = shown.map(e => {
+    const credit = isCredit(e), c = credit ? RECEIVED : (catById[e.category] || { id: e.category, name: e.category });
+    const sub = [e.person, e.note].filter(Boolean).map(esc).join(" · ");
+    const actions = canWrite() ? (armedDelete === e.id
+      ? `<button type="button" class="link danger" data-del="${esc(e.id)}">Confirm delete</button><button type="button" class="link" data-undel>Keep</button>`
+      : `<button type="button" class="link" data-edit="${esc(e.id)}">Edit</button><button type="button" class="link danger" data-arm="${esc(e.id)}">Delete</button>`) : "";
+    return `<tr><td class="num c-date" style="white-space:nowrap">${fmtDate(e.date)}</td>
+      <td class="c-cat"><span class="pill" data-cat="${esc(c.id)}"><span class="dot"></span>${esc(c.name)}</span></td>
+      <td class="desc c-desc">${esc(e.description)}${sub ? `<small>${sub}</small>` : ""}</td>
+      <td class="c-method">${esc(e.method)}</td><td class="r num cr c-cr">${credit ? fmt(e.amount) : ""}</td><td class="r num c-dr">${credit ? "" : fmt(e.amount)}</td>
+      <td class="r c-act" style="white-space:nowrap">${actions}</td></tr>`;
+  }).join("");
+
+  const sIn = sum(shown.filter(isCredit)), sOut = sum(shown.filter(e => !isCredit(e)));
+  $("foot").innerHTML = shown.length ? `<tr><td colspan="4">Total · ${shown.length} ${shown.length === 1 ? "entry" : "entries"}</td><td class="r num cr">${sIn ? fmt(sIn) : ""}</td><td class="r num">${sOut ? fmt(sOut) : ""}</td><td></td></tr>` : "";
+
+  $("empty").hidden = shown.length > 0;
+  $("empty").innerHTML = entries.length === 0
+    ? (canWrite() ? "<strong>No entries yet</strong>Choose Debit or Credit, enter the date and amount, then press Save entry." : "<strong>No entries yet</strong>Entries will appear here once they are added.")
+    : "<strong>Nothing in this view</strong>Try another period or filter.";
+
+  $("form").hidden = !canWrite();
+  document.querySelector(".main").style.gridTemplateColumns = canWrite() ? "" : "1fr";
+  $("currency").value = currency;
+}
+
+$("summary").addEventListener("click", e => { const b = e.target.closest("[data-f]"); if (!b) return; filter = filter === b.dataset.f ? "all" : b.dataset.f; render(); });
+
+$("rows").addEventListener("click", async e => {
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.dataset.arm) { armedDelete = t.dataset.arm; render(); }
+  else if ("undel" in t.dataset) { armedDelete = null; render(); }
+  else if (t.dataset.del) {
+    const id = t.dataset.del; armedDelete = null; t.disabled = true;
+    try {
+      await api("delete", { id });
+      entries = entries.filter(x => x.id !== id); store.set("cache", { entries, at: Date.now() });
+      setMsg("Entry deleted."); if (editingId === id) resetForm();
+    } catch (err) { setMsg("Could not delete: " + err.message, true); }
+    render();
+  } else if (t.dataset.edit) startEdit(t.dataset.edit);
+});
+
+function startEdit(id) {
+  const e = entries.find(x => x.id === id); if (!e) return;
+  editingId = id;
+  $(isCredit(e) ? "t-credit" : "t-debit").checked = true; syncType();
+  if (!isCredit(e) && $("cat-" + e.category)) $("cat-" + e.category).checked = true;
+  $("f-date").value = e.date; $("f-amount").value = e.amount; $("f-desc").value = e.description;
+  $("f-person").value = e.person || ""; $("f-method").value = e.method || "Cash"; $("f-note").value = e.note || "";
+  $("formTitle").textContent = "Edit entry"; $("saveBtn").textContent = "Save changes"; $("cancelBtn").hidden = false;
+  setMsg(""); $("form").scrollIntoView({ behavior: "smooth", block: "start" }); $("f-amount").focus({ preventScroll: true });
+}
+function resetForm() {
+  editingId = null;
+  const keepCat = document.querySelector('input[name="cat"]:checked')?.value || "utilities";
+  $("form").reset(); $("cat-" + keepCat).checked = true; syncType();
+  $("f-date").value = localToday();
+  $("formTitle").textContent = "Add an entry"; $("saveBtn").textContent = "Save entry"; $("cancelBtn").hidden = true;
+}
+$("cancelBtn").addEventListener("click", () => { resetForm(); setMsg(""); });
+
+$("form").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const amount = Number($("f-amount").value);
+  const date = $("f-date").value, description = $("f-desc").value.trim();
+  if (!date) return setMsg("Enter the date.", true);
+  if (!(amount > 0)) return setMsg("Enter an amount greater than zero.", true);
+  if (!description) return setMsg("Add a short description so you can recognise it later.", true);
+  const credit = $("t-credit").checked;
+  const entry = {
+    id: editingId || undefined, type: credit ? "credit" : "debit",
+    category: credit ? "received" : document.querySelector('input[name="cat"]:checked').value,
+    date, amount: Math.round(amount * 100) / 100, description,
+    person: $("f-person").value.trim(), method: $("f-method").value, note: $("f-note").value.trim(),
+  };
+  $("saveBtn").disabled = true; setMsg("Saving…");
+  try {
+    const { entry: saved } = await api("save", { entry });
+    const i = entries.findIndex(x => x.id === saved.id);
+    if (i >= 0) entries[i] = saved; else entries.push(saved);
+    store.set("cache", { entries, at: Date.now() });
+    setMsg(editingId ? "Changes saved." : `Saved ${fmt(saved.amount)} ${credit ? "as credit" : "under " + catById[saved.category].name}.`);
+    if (month !== "all" && !date.startsWith(month)) month = date.slice(0, 7);
+    resetForm(); render();
+  } catch (err) { setMsg("Could not save: " + err.message, true); }
+  finally { $("saveBtn").disabled = false; }
+});
+
+$("currency").addEventListener("change", e => { currency = e.target.value; store.set("currency", currency); render(); });
+
+$("settingsBtn").addEventListener("click", () => {
+  $("setInfo").textContent = `Connected to your expense sheet with the ${canWrite() ? "edit" : "view-only"} PIN. Disconnect to switch PIN or connect to a different sheet.`;
+  $("settingsPanel").hidden = !$("settingsPanel").hidden;
+});
+$("closeSettingsBtn").addEventListener("click", () => { $("settingsPanel").hidden = true; });
+$("disconnectBtn").addEventListener("click", () => {
+  store.del("cfg"); store.del("cache"); store.del("role"); cfg = null; entries = []; $("settingsPanel").hidden = true; showSetup();
+});
+
+resetForm();
+if (cfg) showApp(); else showSetup();
+
+if ("serviceWorker" in navigator && location.protocol === "https:" && !window.Capacitor) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>
