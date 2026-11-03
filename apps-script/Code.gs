@@ -5,10 +5,10 @@
  * (Extensions → Apps Script), set the two PINs below, then
  * Deploy → New deployment → Web app (Execute as: Me, Who has access: Anyone).
  * The app talks to the resulting ".../exec" link. Every entry is a row
- * in the "Entries" tab. After each change the script also rebuilds that
- * month's tab ("Nov 2026": day-wise, with totals and a filter) and the
- * "Summary" tab. Run rebuildAllMonths() once from the editor to rebuild
- * every month tab from "Entries".
+ * in the "Entries" tab, shared with the Claude ledger page. Month tabs
+ * ("Nov 2026": day-wise, totals and a filter) and the "Summary" tab are
+ * formulas over "Entries"; the script adds a month's tab the first time that
+ * month appears. Run rebuildAllMonths() from the editor to add any missing.
  */
 
 // PIN for adding, editing and deleting entries. Change it before deploying.
@@ -145,28 +145,29 @@ function findRow_(sh, id) {
   return 0;
 }
 
-/* ---------- Month tabs and Summary ---------- */
+/* ---------- Month tabs and Summary ----------
+   Month tabs ("Nov 2026") and the Summary are formulas over "Entries", so they
+   stay correct whichever device saved an entry (this app or the Claude
+   ledger). A tab is only written when it is missing or still holds an old
+   fixed copy (no marker in M1). */
 
 const MONTH_CATS = ['Utilities', 'Visa', 'Tickets', 'Villa cash'];
 const HEAD_FILL = '#e0f0f2';
+const MARK = 'Updates by itself from the Entries tab. Add or change entries in the app or the Claude ledger, not here.';
+const KEY = 'IF(ISNUMBER(Entries!B2:B),TEXT(Entries!B2:B,"yyyy-mm-dd"),Entries!B2:B)';
 
-// Rebuild every month tab and the Summary from "Entries". Run it from the editor.
+// Make sure every month in "Entries" has its tab and Summary row. Run it from the editor.
 function rebuildAllMonths() {
-  const months = {};
-  list_().forEach(function (e) { months[e.date.slice(0, 7)] = true; });
-  refreshMonths_(Object.keys(months).map(function (m) { return m + '-01'; }));
+  refreshMonths_([]);
 }
 
 function refreshMonths_(dates) {
-  const all = list_();
-  const done = {};
-  dates.forEach(function (d) {
-    const ym = String(d || '').slice(0, 7);
-    if (!/^\d{4}-\d{2}$/.test(ym) || done[ym]) return;
-    done[ym] = true;
-    writeMonth_(ym, all.filter(function (e) { return e.date.indexOf(ym) === 0; }));
-  });
-  writeSummary_(all);
+  const months = {};
+  list_().forEach(function (e) { months[e.date.slice(0, 7)] = true; });
+  dates.forEach(function (d) { const ym = String(d || '').slice(0, 7); if (/^\d{4}-\d{2}$/.test(ym)) months[ym] = true; });
+  const list = Object.keys(months).sort().reverse();
+  list.forEach(ensureMonth_);
+  ensureSummary_(list);
 }
 
 function monthTitle_(ym) {
@@ -174,70 +175,52 @@ function monthTitle_(ym) {
   return Utilities.formatDate(new Date(Number(p[0]), Number(p[1]) - 1, 1, 12), Session.getScriptTimeZone(), 'MMM yyyy');
 }
 
-function tab_(title, index) {
+function ensureMonth_(ym) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const title = monthTitle_(ym);
   let sh = ss.getSheetByName(title);
-  if (!sh) sh = ss.insertSheet(title, Math.min(index, ss.getNumSheets()));
+  if (sh && sh.getRange('M1').getValue() === MARK) return;
+  if (!sh) sh = ss.insertSheet(title, Math.min(1, ss.getNumSheets()));
   const filter = sh.getFilter();
   if (filter) filter.remove();
   sh.clear();
-  return sh;
-}
-
-// Text that starts like a formula is kept as plain text.
-function text_(v) {
-  const t = String(v == null ? '' : v);
-  return /^[=+\-@]/.test(t) ? "'" + t : t;
-}
-
-function writeMonth_(ym, entries) {
-  entries.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt || 0) - (b.createdAt || 0); });
-  const sh = tab_(monthTitle_(ym), 1);
-  // Totals sit above the header so the filter never hides them.
-  const top = [
-    ['Credit', '=SUM(H5:H)', 'Debit', '=SUM(I5:I)', 'Balance', '=B1-D1', 'Shown by filter:', 'Credit', '=SUBTOTAL(109,H5:H)', 'Debit', '=SUBTOTAL(109,I5:I)'],
-    [].concat.apply([], MONTH_CATS.map(function (c) { return [c, '=SUMIFS(I5:I,D5:D,"' + c + '")']; })).concat(['', '', '']),
-    ['', '', '', '', '', '', '', '', '', '', ''],
-  ];
-  sh.getRange(1, 1, top.length, 11).setValues(top);
+  const rows = '=ARRAYFORMULA(IFERROR(SORT(FILTER({DATEVALUE(' + KEY + '),TEXT(DATEVALUE(' + KEY + '),"dddd"),Entries!C2:C,Entries!D2:D,' +
+    'Entries!E2:E,Entries!F2:F,Entries!G2:G,IF(Entries!C2:C="Credit",Entries!H2:H,""),IF(Entries!C2:C="Debit",Entries!H2:H,""),Entries!I2:I},' +
+    'LEFT(' + KEY + ',7)="' + ym + '"),1,TRUE),""))';
+  const pad = function (r) { while (r.length < 13) r.push(''); return r; };
+  sh.getRange(1, 1, 5, 13).setValues([
+    pad(['Credit', '=SUM(H5:H)', 'Debit', '=SUM(I5:I)', 'Balance', '=B1-D1', 'Shown by filter:', 'Credit', '=SUBTOTAL(109,H5:H)', 'Debit', '=SUBTOTAL(109,I5:I)', '', MARK]),
+    pad([].concat.apply([], MONTH_CATS.map(function (c) { return [c, '=SUMIFS(I5:I,D5:D,"' + c + '")']; }))),
+    pad([]),
+    pad(['Date', 'Day', 'Type', 'Category', 'Description', 'Person', 'Paid by', 'Credit (AED)', 'Debit (AED)', 'Note']),
+    pad([rows]),
+  ]);
   sh.getRange(1, 1, 2, 11).setFontWeight('bold').setNumberFormat('#,##0.00');
-
-  const header = ['Date', 'Day', 'Type', 'Category', 'Description', 'Person', 'Paid by', 'Credit (AED)', 'Debit (AED)', 'Note'];
-  const rows = entries.map(function (e) {
-    const p = e.date.split('-').map(Number);
-    const day = new Date(p[0], p[1] - 1, p[2], 12);
-    const credit = e.type === 'credit';
-    return [day, Utilities.formatDate(day, Session.getScriptTimeZone(), 'EEEE'), credit ? 'Credit' : 'Debit',
-      CATEGORIES[e.category] || e.category, text_(e.description), text_(e.person), text_(e.method),
-      credit ? e.amount : '', credit ? '' : e.amount, text_(e.note)];
-  });
-  const table = sh.getRange(4, 1, rows.length + 1, header.length);
-  table.setValues([header].concat(rows));
-  sh.getRange(4, 1, 1, header.length).setFontWeight('bold').setBackground(HEAD_FILL);
-  if (rows.length) {
-    sh.getRange(5, 1, rows.length, 1).setNumberFormat('dd-mmm-yyyy');
-    sh.getRange(5, 8, rows.length, 2).setNumberFormat('#,##0.00');
-  }
-  table.createFilter();
+  sh.getRange('M1').setFontStyle('italic');
+  sh.getRange(4, 1, 1, 10).setFontWeight('bold').setBackground(HEAD_FILL);
+  sh.getRange('A5:A').setNumberFormat('dd-mmm-yyyy');
+  sh.getRange('H5:I').setNumberFormat('#,##0.00');
+  sh.getRange(4, 1, sh.getMaxRows() - 3, 10).createFilter();
   sh.setFrozenRows(4);
   sh.autoResizeColumns(1, 11);
 }
 
-function writeSummary_(entries) {
-  const sh = tab_('Summary', 0);
-  const byMonth = {};
-  entries.forEach(function (e) {
-    const ym = e.date.slice(0, 7);
-    const m = byMonth[ym] || (byMonth[ym] = { credit: 0, debit: 0, cats: {} });
-    if (e.type === 'credit') m.credit += e.amount;
-    else { m.debit += e.amount; m.cats[e.category] = (m.cats[e.category] || 0) + e.amount; }
-  });
-  const keys = ['utilities', 'visa', 'tickets', 'villa'];
-  const rows = Object.keys(byMonth).sort().reverse().map(function (ym) {
-    const m = byMonth[ym];
-    return [monthTitle_(ym), m.credit, m.debit, m.credit - m.debit].concat(keys.map(function (k) { return m.cats[k] || 0; }));
-  });
+function ensureSummary_(months) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName('Summary');
+  if (!sh) sh = ss.insertSheet('Summary', 0);
+  const want = months.map(monthTitle_);
+  const n = Math.max(sh.getLastRow() - 1, 0);
+  const have = n ? sh.getRange(2, 1, n, 1).getValues().map(function (r) { return String(r[0]); }) : [];
+  if (sh.getRange('A1').getValue() === 'Month' && have.join('|') === want.join('|')) return;
   const header = ['Month', 'Credit', 'Debit', 'Balance'].concat(MONTH_CATS);
+  const rows = months.map(function (ym, i) {
+    const r = i + 2, m = '"' + ym + '*"';
+    return [monthTitle_(ym), '=SUMIFS(Entries!H:H,Entries!B:B,' + m + ',Entries!C:C,"Credit")',
+      '=SUMIFS(Entries!H:H,Entries!B:B,' + m + ',Entries!C:C,"Debit")', '=B' + r + '-C' + r]
+      .concat(MONTH_CATS.map(function (c) { return '=SUMIFS(Entries!H:H,Entries!B:B,' + m + ',Entries!C:C,"Debit",Entries!D:D,"' + c + '")'; }));
+  });
+  sh.clear();
   sh.getRange(1, 1, rows.length + 1, header.length).setValues([header].concat(rows));
   sh.getRange(1, 1, 1, header.length).setFontWeight('bold').setBackground(HEAD_FILL);
   if (rows.length) sh.getRange(2, 2, rows.length, header.length - 1).setNumberFormat('#,##0.00');

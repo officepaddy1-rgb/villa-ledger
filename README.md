@@ -8,25 +8,14 @@ The sheet has three kinds of tab:
 
 | Tab | What it holds |
 |---|---|
-| `Entries` | Every entry, one row each. The app reads and writes only this tab |
-| `Nov 2026`, `Dec 2026`, … | One tab per month, day by day, with Credit/Debit/Balance and category totals above a filtered table. Rebuilt by the script after every change |
-| `Summary` | One row per month: Credit, Debit, Balance and each category |
+| `Entries` | Every entry, one row each. The app (web and Android) and the Claude ledger page all read and write this tab, so they always show the same entries after a refresh |
+| `Nov 2026`, `Dec 2026`, … | One tab per month, day by day, with Credit/Debit/Balance and category totals above a filtered table. Formulas over `Entries`, so they update by themselves |
+| `Summary` | One row per month: Credit, Debit, Balance and each category, also formulas |
 
-Edit entries in the app, not in the month tabs: a month tab is rebuilt from `Entries`
-each time something in that month changes. To rebuild every month tab at once, open the
-Apps Script editor, choose `rebuildAllMonths` in the function list and press **Run**.
-
-```
- iPhone / Mac (installed web app)  ─┐
- Android (APK)                      ─┼──►  Apps Script link (/exec)  ──►  Google Sheet "Entries" tab
- Any browser                        ─┘        checks the PIN
-```
-
-| Folder | What it is |
-|---|---|
-| `web/` | The app (one page plus icons, manifest and offline support) |
-| `apps-script/Code.gs` | The small backend that reads and writes the Google Sheet |
-| `android/` | Wrapper that turns `web/` into an Android APK (built by GitHub Actions) |
+Add and change entries in the app or the Claude ledger, not in the month tabs. A new
+month's tab is added the first time an entry in that month is saved. To add any missing
+month tabs at once, open the Apps Script editor, choose `rebuildAllMonths` in the
+function list and press **Run**.
 
 ## 1. Connect the Google Sheet (one time, about 5 minutes)
 
